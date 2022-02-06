@@ -4,9 +4,11 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
+
+# Lab A Clustering
 ```{r}
 # load R packages
 librarian::shelf(
@@ -316,3 +318,172 @@ fviz_dend(
 Question: In dendrogram plots, which is the biggest determinant of relatedness between observations: the distance between observations along the labeled axes or the height of their shared connection?
 
 Answer: The height of their shared connection is the biggest determinant of relatedness between observations. 
+
+
+# Lab B Ordination
+
+```{r}
+# load R packages
+librarian::shelf(
+  dplyr, ggplot2, h2o)
+
+# set seed for reproducible results
+set.seed(42)
+
+# get data
+url <- "https://koalaverse.github.io/homlr/data/my_basket.csv"
+my_basket <- readr::read_csv(url)
+dim(my_basket)
+```
+
+```{r}
+h2o.no_progress()  # turn off progress bars for brevity
+h2o.init(max_mem_size = "5g")  # connect to H2O instance
+```
+
+```{r}
+# convert data to h2o object
+my_basket.h2o <- as.h2o(my_basket)
+
+# run PCA
+my_pca <- h2o.prcomp(
+  training_frame = my_basket.h2o,
+  pca_method = "GramSVD",
+  k = ncol(my_basket.h2o), 
+  transform = "STANDARDIZE", 
+  impute_missing = TRUE,
+  max_runtime_secs = 1000)
+my_pca
+```
+
+Question: Why is the pca_method of “GramSVD” chosen over “GLRM”?
+
+Answer: GLRM best suits data that is categorical and GramSVD suits data that is numerical, therefore GramSVD is chosen here.
+
+
+Question: How many initial principal components are chosen with respect to dimensions of the input data?
+
+Answer: 43, the number of columns in the my_basket dataframe
+
+
+```{r}
+my_pca@model$model_summary %>% 
+  add_rownames() %>% 
+  tidyr::pivot_longer(-rowname) %>% 
+  filter(
+    rowname == "Proportion of Variance") %>% 
+  mutate(
+    pc = stringr::str_replace(name, "pc", "") %>% as.integer()) %>% 
+  ggplot(aes(x = pc, y=cumsum(value))) +
+  geom_point() + geom_line() +
+  theme(axis.text.x = element_text(angle=90, hjust = 1))  +
+  ylab("Cumulative Proportion of Variance Explained")
+```
+
+
+```{r}
+my_pca@model$eigenvectors %>% 
+  as.data.frame() %>% 
+  mutate(feature = row.names(.)) %>%
+  ggplot(aes(pc1, reorder(feature, pc1))) +
+  geom_point()
+```
+
+Question: What category of grocery items contribute most to PC1?
+
+Answer: Alcohol (bulmers, red wine, fosters)
+
+```{r}
+my_pca@model$eigenvectors %>% 
+  as.data.frame() %>% 
+  mutate(feature = row.names(.)) %>%
+  ggplot(aes(pc1, pc2, label = feature)) +
+  geom_text()
+```
+
+Question: What category of grocery items contribute the least to PC1 but positively towards PC2?
+
+Answer: Vegetables
+
+
+```{r}
+# Compute eigenvalues
+eigen <- my_pca@model$importance["Standard deviation", ] %>%
+  as.vector() %>%
+  .^2
+  
+# Sum of all eigenvalues equals number of variables
+sum(eigen)
+```
+
+
+```{r}
+## [1] 42
+
+# Find PCs where the sum of eigenvalues is greater than or equal to 1
+which(eigen >= 1)
+```
+
+
+
+```{r}
+# Extract PVE and CVE
+ve <- data.frame(
+  PC  = my_pca@model$importance %>% seq_along(),
+  PVE = my_pca@model$importance %>% .[2,] %>% unlist(),
+  CVE = my_pca@model$importance %>% .[3,] %>% unlist())
+
+# Plot PVE and CVE
+ve %>%
+  tidyr::gather(metric, variance_explained, -PC) %>%
+  ggplot(aes(PC, variance_explained)) +
+  geom_point() +
+  facet_wrap(~ metric, ncol = 1, scales = "free")
+```
+
+
+```{r}
+# How many PCs required to explain at least 75% of total variability
+min(which(ve$CVE >= 0.75))
+```
+
+
+
+Question: How many principal components would you include to explain 90% of the total variance?
+
+```{r}
+# How many PCs required to explain at least 90% of total variability
+min(which(ve$CVE >= 0.90))
+```
+
+
+Answer: 36 principal components
+
+
+```{r}
+# Screee plot criterion
+data.frame(
+  PC  = my_pca@model$importance %>% seq_along,
+  PVE = my_pca@model$importance %>% .[2,] %>% unlist()) %>%
+  ggplot(aes(PC, PVE, group = 1, label = PC)) +
+  geom_point() +
+  geom_line() +
+  geom_text(nudge_y = -.002)
+```
+
+Question: How many principal components to include up to the elbow of the PVE, i.e. the “elbow” before plateau of dimensions explaining the least variance?
+
+Answer: 8 principal components
+
+
+
+Question: What are a couple of disadvantages to using PCA?
+
+Answer: 1) PCA can be highly affected by outliers.
+        2) PCA does not perform as well in very high dimensional space where complex nonlinear patterns often exist.
+        
+        
+```{r}
+
+```
+
